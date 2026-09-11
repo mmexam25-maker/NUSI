@@ -53,15 +53,26 @@ public final class GoogleStore {
             "1tZp5paf-Vju9w1e2Z4naKHQ3VKu-KFcM"
     );
 
+    /*
+     * Drive is authenticated using the user's Google OAuth refresh token.
+     * This avoids the Service Account storage quota restriction.
+     */
+    private static final String GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "");
+    private static final String GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", "");
+    private static final String GOOGLE_REFRESH_TOKEN = env("GOOGLE_REFRESH_TOKEN", "");
+
     private static final String DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
     private static final String DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
     private static final String SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets/";
-    private static final String GOOGLE_SCOPE =
-            "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets";
+    private static final String GOOGLE_OAUTH_TOKEN = "https://oauth2.googleapis.com/token";
+
+    private static final String SHEETS_SCOPE =
+            "https://www.googleapis.com/auth/spreadsheets";
 
     private static final long LINK_LIFETIME_SECONDS = 24L * 60L * 60L;
 
-    private static volatile Token cachedToken;
+    private static volatile Token cachedDriveToken;
+    private static volatile Token cachedSheetsToken;
     private static volatile ServiceAccount cachedAccount;
 
     private GoogleStore() {}
@@ -82,6 +93,10 @@ public final class GoogleStore {
     private record ServiceAccount(String clientEmail, String tokenUri, PrivateKey privateKey) {}
     private record DriveItem(String id, String name, String mimeType) {}
 
+    /*************************************************
+     * SLIDER
+     *************************************************/
+
     public static List<SliderImage> listSliderImages() throws Exception {
         List<SliderImage> out = new ArrayList<>();
         String pageToken = "";
@@ -101,12 +116,13 @@ public final class GoogleStore {
                 url += "&pageToken=" + enc(pageToken);
             }
 
-            JsonNode root = getJson(url);
+            JsonNode root = getDriveJson(url);
             JsonNode files = root.path("files");
 
             if (files.isArray()) {
                 for (JsonNode f : files) {
                     String mime = f.path("mimeType").asText("");
+
                     if (mime.startsWith("image/")) {
                         out.add(new SliderImage(
                                 f.path("id").asText(""),
@@ -124,6 +140,10 @@ public final class GoogleStore {
         return out;
     }
 
+    /*************************************************
+     * READ DRIVE FILE
+     *************************************************/
+
     public static BinaryFile readDriveFile(String fileId) throws Exception {
         if (fileId == null || fileId.isBlank()) {
             throw new IllegalArgumentException("File id is required.");
@@ -133,7 +153,7 @@ public final class GoogleStore {
                 + "?fields=" + enc("id,name,mimeType,trashed")
                 + "&supportsAllDrives=true";
 
-        JsonNode meta = getJson(metaUrl);
+        JsonNode meta = getDriveJson(metaUrl);
 
         if (meta.path("trashed").asBoolean(false)) {
             throw new IllegalArgumentException("File is unavailable.");
@@ -145,13 +165,17 @@ public final class GoogleStore {
         HttpResponse<byte[]> response = send(
                 HttpRequest.newBuilder(URI.create(mediaUrl))
                         .timeout(Duration.ofSeconds(60))
-                        .header("Authorization", "Bearer " + accessToken())
+                        .header("Authorization", "Bearer " + driveAccessToken())
                         .GET()
                         .build(),
                 HttpResponse.BodyHandlers.ofByteArray()
         );
 
-        require2xx(response.statusCode(), response.body(), "Drive file download failed");
+        require2xx(
+                response.statusCode(),
+                response.body(),
+                "Drive file download failed"
+        );
 
         return new BinaryFile(
                 response.body(),
@@ -159,6 +183,10 @@ public final class GoogleStore {
                 meta.path("name").asText("")
         );
     }
+
+    /*************************************************
+     * SAVE MEMBER
+     *************************************************/
 
     public static SavedMember saveMember(
             JsonNode data,
@@ -171,34 +199,79 @@ public final class GoogleStore {
     ) throws Exception {
 
         Instant submitted = Instant.now();
-        long expiresEpoch = submitted.plusSeconds(LINK_LIFETIME_SECONDS).getEpochSecond();
+        long expiresEpoch = submitted
+                .plusSeconds(LINK_LIFETIME_SECONDS)
+                .getEpochSecond();
 
         String surname = text(data, "surname");
         String givenName = text(data, "givenName");
-        String indos = text(data, "indos").toUpperCase(Locale.ROOT);
+        String indos = text(data, "indos")
+                .toUpperCase(Locale.ROOT);
 
         String folderName = sanitize(surname)
                 + "_" + sanitize(givenName)
                 + "_" + sanitize(indos)
                 + "_" + submitted.toEpochMilli();
 
-        DriveItem folder = createTemporaryFolder(folderName, expiresEpoch);
+        DriveItem folder = createTemporaryFolder(
+                folderName,
+                expiresEpoch
+        );
 
         String photoFileName = photoMime.equalsIgnoreCase("image/png")
                 ? "Photo.png"
                 : "Photo.jpg";
 
-        StoredFile photo = uploadFile(folder.id(), photoFileName, photoMime, photoBytes);
-        StoredFile cdc = uploadFile(folder.id(), "CDC.pdf", "application/pdf", cdcPdf);
-        StoredFile passport = uploadFile(folder.id(), "Passport.pdf", "application/pdf", passportPdf);
+        StoredFile photo = uploadFile(
+                folder.id(),
+                photoFileName,
+                photoMime,
+                photoBytes
+        );
 
-        String photoLink = TempLinks.create(baseUrl, photo.id(), expiresEpoch, photo.name(), linkSecret);
-        String cdcLink = TempLinks.create(baseUrl, cdc.id(), expiresEpoch, cdc.name(), linkSecret);
-        String passportLink = TempLinks.create(baseUrl, passport.id(), expiresEpoch, passport.name(), linkSecret);
+        StoredFile cdc = uploadFile(
+                folder.id(),
+                "CDC.pdf",
+                "application/pdf",
+                cdcPdf
+        );
+
+        StoredFile passport = uploadFile(
+                folder.id(),
+                "Passport.pdf",
+                "application/pdf",
+                passportPdf
+        );
+
+        String photoLink = TempLinks.create(
+                baseUrl,
+                photo.id(),
+                expiresEpoch,
+                photo.name(),
+                linkSecret
+        );
+
+        String cdcLink = TempLinks.create(
+                baseUrl,
+                cdc.id(),
+                expiresEpoch,
+                cdc.name(),
+                linkSecret
+        );
+
+        String passportLink = TempLinks.create(
+                baseUrl,
+                passport.id(),
+                expiresEpoch,
+                passport.name(),
+                linkSecret
+        );
 
         String address = buildAddress(data);
         String submittedAt = formatIst(submitted);
-        String expiresAt = formatIst(Instant.ofEpochSecond(expiresEpoch));
+        String expiresAt = formatIst(
+                Instant.ofEpochSecond(expiresEpoch)
+        );
 
         // A:X = 24 columns
         List<Object> row = List.of(
@@ -239,6 +312,10 @@ public final class GoogleStore {
         );
     }
 
+    /*************************************************
+     * CLEANUP EXPIRED TEMP FOLDERS
+     *************************************************/
+
     public static int cleanupExpired() throws Exception {
         long now = Instant.now().getEpochSecond();
         int deleted = 0;
@@ -261,15 +338,19 @@ public final class GoogleStore {
                 url += "&pageToken=" + enc(pageToken);
             }
 
-            JsonNode root = getJson(url);
+            JsonNode root = getDriveJson(url);
             JsonNode files = root.path("files");
 
             if (files.isArray()) {
                 for (JsonNode folder : files) {
                     String id = folder.path("id").asText("");
-                    String expText = folder.path("appProperties").path("nusiExpiresAt").asText("");
+                    String expText = folder
+                            .path("appProperties")
+                            .path("nusiExpiresAt")
+                            .asText("");
 
                     long exp;
+
                     try {
                         exp = Long.parseLong(expText);
                     } catch (Exception ignored) {
@@ -277,7 +358,7 @@ public final class GoogleStore {
                     }
 
                     if (!id.isBlank() && exp <= now) {
-                        trashFile(id);
+                        trashDriveFile(id);
                         deleted++;
                     }
                 }
@@ -290,28 +371,51 @@ public final class GoogleStore {
         return deleted;
     }
 
-    private static DriveItem createTemporaryFolder(String folderName, long expiresEpoch) throws Exception {
+    /*************************************************
+     * CREATE TEMP FOLDER
+     *************************************************/
+
+    private static DriveItem createTemporaryFolder(
+            String folderName,
+            long expiresEpoch
+    ) throws Exception {
+
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("name", folderName);
         metadata.put("mimeType", "application/vnd.google-apps.folder");
         metadata.put("parents", List.of(MAIN_FOLDER_ID));
-        metadata.put("appProperties", Map.of(
-                "nusiTemp", "true",
-                "nusiExpiresAt", String.valueOf(expiresEpoch)
-        ));
+        metadata.put(
+                "appProperties",
+                Map.of(
+                        "nusiTemp", "true",
+                        "nusiExpiresAt", String.valueOf(expiresEpoch)
+                )
+        );
 
         String createUrl = DRIVE_FILES
                 + "?supportsAllDrives=true"
                 + "&fields=" + enc("id,name,mimeType");
 
-        JsonNode created = sendJsonRequest(
+        JsonNode created = sendDriveJsonRequest(
                 "POST",
                 createUrl,
                 JSON.writeValueAsBytes(metadata)
         );
 
-        return driveItem(created);
+        DriveItem item = driveItem(created);
+
+        if (item.id().isBlank()) {
+            throw new IllegalStateException(
+                    "Drive folder creation succeeded but folder id was missing."
+            );
+        }
+
+        return item;
     }
+
+    /*************************************************
+     * UPLOAD FILE
+     *************************************************/
 
     private static StoredFile uploadFile(
             String folderId,
@@ -320,7 +424,10 @@ public final class GoogleStore {
             byte[] bytes
     ) throws Exception {
 
-        String boundary = "nusi_" + UUID.randomUUID().toString().replace("-", "");
+        String boundary = "nusi_"
+                + UUID.randomUUID()
+                .toString()
+                .replace("-", "");
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("name", fileName);
@@ -341,20 +448,33 @@ public final class GoogleStore {
         HttpResponse<byte[]> response = send(
                 HttpRequest.newBuilder(URI.create(uploadUrl))
                         .timeout(Duration.ofSeconds(90))
-                        .header("Authorization", "Bearer " + accessToken())
-                        .header("Content-Type", "multipart/related; boundary=" + boundary)
-                        .POST(HttpRequest.BodyPublishers.ofByteArray(multipart))
+                        .header("Authorization", "Bearer " + driveAccessToken())
+                        .header(
+                                "Content-Type",
+                                "multipart/related; boundary=" + boundary
+                        )
+                        .POST(
+                                HttpRequest.BodyPublishers.ofByteArray(
+                                        multipart
+                                )
+                        )
                         .build(),
                 HttpResponse.BodyHandlers.ofByteArray()
         );
 
-        require2xx(response.statusCode(), response.body(), "Drive upload failed");
+        require2xx(
+                response.statusCode(),
+                response.body(),
+                "Drive upload failed"
+        );
 
         JsonNode created = JSON.readTree(response.body());
         String id = created.path("id").asText("");
 
         if (id.isBlank()) {
-            throw new IllegalStateException("Drive upload succeeded but file id was missing.");
+            throw new IllegalStateException(
+                    "Drive upload succeeded but file id was missing."
+            );
         }
 
         return new StoredFile(
@@ -364,29 +484,58 @@ public final class GoogleStore {
         );
     }
 
-    private static void trashFile(String id) throws Exception {
-        String patchUrl = DRIVE_FILES + "/" + encPath(id)
+    /*************************************************
+     * TRASH DRIVE FILE/FOLDER
+     *************************************************/
+
+    private static void trashDriveFile(String id) throws Exception {
+        String patchUrl = DRIVE_FILES
+                + "/" + encPath(id)
                 + "?supportsAllDrives=true";
 
-        sendJsonRequest(
+        sendDriveJsonRequest(
                 "PATCH",
                 patchUrl,
-                JSON.writeValueAsBytes(Map.of("trashed", true))
+                JSON.writeValueAsBytes(
+                        Map.of("trashed", true)
+                )
         );
     }
 
-    private static void appendSheetRow(List<Object> row) throws Exception {
-        String range = "'" + SHEET_NAME.replace("'", "''") + "'!A:X";
+    /*************************************************
+     * APPEND GOOGLE SHEET
+     *************************************************/
+
+    private static void appendSheetRow(
+            List<Object> row
+    ) throws Exception {
+
+        String range = "'"
+                + SHEET_NAME.replace("'", "''")
+                + "'!A:X";
 
         String url = SHEETS_BASE
                 + encPath(SPREADSHEET_ID)
                 + "/values/"
                 + encPath(range)
-                + ":append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS";
+                + ":append?valueInputOption=USER_ENTERED"
+                + "&insertDataOption=INSERT_ROWS";
 
-        Map<String, Object> body = Map.of("values", List.of(row));
-        sendJsonRequest("POST", url, JSON.writeValueAsBytes(body));
+        Map<String, Object> body = Map.of(
+                "values",
+                List.of(row)
+        );
+
+        sendSheetsJsonRequest(
+                "POST",
+                url,
+                JSON.writeValueAsBytes(body)
+        );
     }
+
+    /*************************************************
+     * MULTIPART BODY
+     *************************************************/
 
     private static byte[] multipartRelated(
             String boundary,
@@ -394,59 +543,86 @@ public final class GoogleStore {
             String mimeType,
             byte[] fileBytes
     ) throws Exception {
+
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 
         String first = "--" + boundary + "\r\n"
                 + "Content-Type: application/json; charset=UTF-8\r\n\r\n";
+
         out.write(first.getBytes(StandardCharsets.UTF_8));
         out.write(metadataJson);
         out.write("\r\n".getBytes(StandardCharsets.UTF_8));
 
         String second = "--" + boundary + "\r\n"
                 + "Content-Type: " + mimeType + "\r\n\r\n";
+
         out.write(second.getBytes(StandardCharsets.UTF_8));
         out.write(fileBytes);
-        out.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+        out.write(
+                ("\r\n--" + boundary + "--\r\n")
+                        .getBytes(StandardCharsets.UTF_8)
+        );
 
         return out.toByteArray();
     }
 
-    private static JsonNode getJson(String url) throws Exception {
+    /*************************************************
+     * DRIVE GET JSON
+     *************************************************/
+
+    private static JsonNode getDriveJson(
+            String url
+    ) throws Exception {
+
         HttpResponse<byte[]> response = send(
                 HttpRequest.newBuilder(URI.create(url))
                         .timeout(Duration.ofSeconds(60))
-                        .header("Authorization", "Bearer " + accessToken())
+                        .header("Authorization", "Bearer " + driveAccessToken())
                         .GET()
                         .build(),
                 HttpResponse.BodyHandlers.ofByteArray()
         );
 
-        require2xx(response.statusCode(), response.body(), "Google API request failed");
+        require2xx(
+                response.statusCode(),
+                response.body(),
+                "Google Drive API request failed"
+        );
+
         return JSON.readTree(response.body());
     }
 
-    private static JsonNode sendJsonRequest(String method, String url, byte[] body) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(60))
-                .header("Authorization", "Bearer " + accessToken())
-                .header("Content-Type", "application/json; charset=utf-8");
+    /*************************************************
+     * DRIVE JSON REQUEST
+     *************************************************/
 
-        if ("POST".equals(method)) {
-            builder.POST(HttpRequest.BodyPublishers.ofByteArray(body));
-        } else if ("PATCH".equals(method)) {
-            builder.method("PATCH", HttpRequest.BodyPublishers.ofByteArray(body));
-        } else if ("PUT".equals(method)) {
-            builder.PUT(HttpRequest.BodyPublishers.ofByteArray(body));
-        } else {
-            throw new IllegalArgumentException("Unsupported HTTP method: " + method);
-        }
+    private static JsonNode sendDriveJsonRequest(
+            String method,
+            String url,
+            byte[] body
+    ) throws Exception {
+
+        HttpRequest.Builder builder = HttpRequest
+                .newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(60))
+                .header("Authorization", "Bearer " + driveAccessToken())
+                .header(
+                        "Content-Type",
+                        "application/json; charset=utf-8"
+                );
+
+        addBody(builder, method, body);
 
         HttpResponse<byte[]> response = send(
                 builder.build(),
                 HttpResponse.BodyHandlers.ofByteArray()
         );
 
-        require2xx(response.statusCode(), response.body(), "Google API request failed");
+        require2xx(
+                response.statusCode(),
+                response.body(),
+                "Google Drive API request failed"
+        );
 
         if (response.body() == null || response.body().length == 0) {
             return JSON.createObjectNode();
@@ -455,6 +631,78 @@ public final class GoogleStore {
         return JSON.readTree(response.body());
     }
 
+    /*************************************************
+     * SHEETS JSON REQUEST
+     *************************************************/
+
+    private static JsonNode sendSheetsJsonRequest(
+            String method,
+            String url,
+            byte[] body
+    ) throws Exception {
+
+        HttpRequest.Builder builder = HttpRequest
+                .newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(60))
+                .header("Authorization", "Bearer " + sheetsAccessToken())
+                .header(
+                        "Content-Type",
+                        "application/json; charset=utf-8"
+                );
+
+        addBody(builder, method, body);
+
+        HttpResponse<byte[]> response = send(
+                builder.build(),
+                HttpResponse.BodyHandlers.ofByteArray()
+        );
+
+        require2xx(
+                response.statusCode(),
+                response.body(),
+                "Google Sheets API request failed"
+        );
+
+        if (response.body() == null || response.body().length == 0) {
+            return JSON.createObjectNode();
+        }
+
+        return JSON.readTree(response.body());
+    }
+
+    private static void addBody(
+            HttpRequest.Builder builder,
+            String method,
+            byte[] body
+    ) {
+
+        if ("POST".equals(method)) {
+            builder.POST(
+                    HttpRequest.BodyPublishers.ofByteArray(body)
+            );
+
+        } else if ("PATCH".equals(method)) {
+            builder.method(
+                    "PATCH",
+                    HttpRequest.BodyPublishers.ofByteArray(body)
+            );
+
+        } else if ("PUT".equals(method)) {
+            builder.PUT(
+                    HttpRequest.BodyPublishers.ofByteArray(body)
+            );
+
+        } else {
+            throw new IllegalArgumentException(
+                    "Unsupported HTTP method: " + method
+            );
+        }
+    }
+
+    /*************************************************
+     * HTTP
+     *************************************************/
+
     private static <T> HttpResponse<T> send(
             HttpRequest request,
             HttpResponse.BodyHandler<T> handler
@@ -462,7 +710,12 @@ public final class GoogleStore {
         return HTTP.send(request, handler);
     }
 
-    private static void require2xx(int status, byte[] body, String prefix) {
+    private static void require2xx(
+            int status,
+            byte[] body,
+            String prefix
+    ) {
+
         if (status >= 200 && status < 300) {
             return;
         }
@@ -471,26 +724,130 @@ public final class GoogleStore {
                 ? ""
                 : new String(body, StandardCharsets.UTF_8);
 
-        if (details.length() > 700) {
-            details = details.substring(0, 700);
+        if (details.length() > 900) {
+            details = details.substring(0, 900);
         }
 
-        throw new IllegalStateException(prefix + " | HTTP " + status + " | " + details);
+        throw new IllegalStateException(
+                prefix
+                        + " | HTTP "
+                        + status
+                        + " | "
+                        + details
+        );
     }
 
-    private static String accessToken() throws Exception {
-        Token token = cachedToken;
+    /*************************************************
+     * DRIVE OAUTH TOKEN
+     *************************************************/
+
+    private static String driveAccessToken() throws Exception {
+        Token token = cachedDriveToken;
         long now = Instant.now().getEpochSecond();
 
-        if (token != null && token.expiresAtEpochSeconds() > now + 90) {
+        if (
+                token != null &&
+                token.expiresAtEpochSeconds() > now + 90
+        ) {
             return token.value();
         }
 
         synchronized (GoogleStore.class) {
-            token = cachedToken;
+            token = cachedDriveToken;
             now = Instant.now().getEpochSecond();
 
-            if (token != null && token.expiresAtEpochSeconds() > now + 90) {
+            if (
+                    token != null &&
+                    token.expiresAtEpochSeconds() > now + 90
+            ) {
+                return token.value();
+            }
+
+            if (
+                    GOOGLE_CLIENT_ID.isBlank() ||
+                    GOOGLE_CLIENT_SECRET.isBlank() ||
+                    GOOGLE_REFRESH_TOKEN.isBlank()
+            ) {
+                throw new IllegalStateException(
+                        "Drive OAuth credentials missing. Add GOOGLE_CLIENT_ID, "
+                                + "GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN in Render Environment."
+                );
+            }
+
+            String form = "client_id=" + enc(GOOGLE_CLIENT_ID)
+                    + "&client_secret=" + enc(GOOGLE_CLIENT_SECRET)
+                    + "&refresh_token=" + enc(GOOGLE_REFRESH_TOKEN)
+                    + "&grant_type=" + enc("refresh_token");
+
+            HttpRequest request = HttpRequest
+                    .newBuilder(URI.create(GOOGLE_OAUTH_TOKEN))
+                    .timeout(Duration.ofSeconds(30))
+                    .header(
+                            "Content-Type",
+                            "application/x-www-form-urlencoded"
+                    )
+                    .POST(
+                            HttpRequest.BodyPublishers.ofString(
+                                    form,
+                                    StandardCharsets.UTF_8
+                            )
+                    )
+                    .build();
+
+            HttpResponse<byte[]> response = send(
+                    request,
+                    HttpResponse.BodyHandlers.ofByteArray()
+            );
+
+            require2xx(
+                    response.statusCode(),
+                    response.body(),
+                    "Google Drive OAuth refresh failed"
+            );
+
+            JsonNode root = JSON.readTree(response.body());
+            String value = root.path("access_token").asText("");
+            long expiresIn = root.path("expires_in").asLong(3600);
+
+            if (value.isBlank()) {
+                throw new IllegalStateException(
+                        "Google Drive OAuth response did not contain access_token."
+                );
+            }
+
+            cachedDriveToken = new Token(
+                    value,
+                    Instant.now().getEpochSecond()
+                            + Math.max(300, expiresIn)
+            );
+
+            return value;
+        }
+    }
+
+    /*************************************************
+     * SHEETS SERVICE ACCOUNT TOKEN
+     *************************************************/
+
+    private static String sheetsAccessToken() throws Exception {
+        Token token = cachedSheetsToken;
+        long now = Instant.now().getEpochSecond();
+
+        if (
+                token != null &&
+                token.expiresAtEpochSeconds() > now + 90
+        ) {
+            return token.value();
+        }
+
+        synchronized (GoogleStore.class) {
+            token = cachedSheetsToken;
+            now = Instant.now().getEpochSecond();
+
+            if (
+                    token != null &&
+                    token.expiresAtEpochSeconds() > now + 90
+            ) {
                 return token.value();
             }
 
@@ -498,33 +855,56 @@ public final class GoogleStore {
             long iat = Instant.now().getEpochSecond();
             long exp = iat + 3600;
 
-            String header = base64Url(JSON.writeValueAsBytes(Map.of(
-                    "alg", "RS256",
-                    "typ", "JWT"
-            )));
+            String header = base64Url(
+                    JSON.writeValueAsBytes(
+                            Map.of(
+                                    "alg", "RS256",
+                                    "typ", "JWT"
+                            )
+                    )
+            );
 
             Map<String, Object> claims = new LinkedHashMap<>();
             claims.put("iss", account.clientEmail());
-            claims.put("scope", GOOGLE_SCOPE);
+            claims.put("scope", SHEETS_SCOPE);
             claims.put("aud", account.tokenUri());
             claims.put("iat", iat);
             claims.put("exp", exp);
 
-            String payload = base64Url(JSON.writeValueAsBytes(claims));
+            String payload = base64Url(
+                    JSON.writeValueAsBytes(claims)
+            );
+
             String signingInput = header + "." + payload;
 
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initSign(account.privateKey());
-            signature.update(signingInput.getBytes(StandardCharsets.US_ASCII));
-            String assertion = signingInput + "." + base64Url(signature.sign());
+            signature.update(
+                    signingInput.getBytes(StandardCharsets.US_ASCII)
+            );
 
-            String form = "grant_type=" + enc("urn:ietf:params:oauth:grant-type:jwt-bearer")
-                    + "&assertion=" + enc(assertion);
+            String assertion = signingInput
+                    + "."
+                    + base64Url(signature.sign());
 
-            HttpRequest tokenRequest = HttpRequest.newBuilder(URI.create(account.tokenUri()))
+            String form = "grant_type="
+                    + enc("urn:ietf:params:oauth:grant-type:jwt-bearer")
+                    + "&assertion="
+                    + enc(assertion);
+
+            HttpRequest tokenRequest = HttpRequest
+                    .newBuilder(URI.create(account.tokenUri()))
                     .timeout(Duration.ofSeconds(30))
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
+                    .header(
+                            "Content-Type",
+                            "application/x-www-form-urlencoded"
+                    )
+                    .POST(
+                            HttpRequest.BodyPublishers.ofString(
+                                    form,
+                                    StandardCharsets.UTF_8
+                            )
+                    )
                     .build();
 
             HttpResponse<byte[]> tokenResponse = send(
@@ -535,7 +915,7 @@ public final class GoogleStore {
             require2xx(
                     tokenResponse.statusCode(),
                     tokenResponse.body(),
-                    "Google OAuth token request failed"
+                    "Google Sheets OAuth token request failed"
             );
 
             JsonNode root = JSON.readTree(tokenResponse.body());
@@ -543,17 +923,24 @@ public final class GoogleStore {
             long expiresIn = root.path("expires_in").asLong(3600);
 
             if (value.isBlank()) {
-                throw new IllegalStateException("Google OAuth response did not contain access_token.");
+                throw new IllegalStateException(
+                        "Google Sheets OAuth response did not contain access_token."
+                );
             }
 
-            cachedToken = new Token(
+            cachedSheetsToken = new Token(
                     value,
-                    Instant.now().getEpochSecond() + Math.max(300, expiresIn)
+                    Instant.now().getEpochSecond()
+                            + Math.max(300, expiresIn)
             );
 
             return value;
         }
     }
+
+    /*************************************************
+     * SERVICE ACCOUNT JSON
+     *************************************************/
 
     private static ServiceAccount serviceAccount() throws Exception {
         ServiceAccount account = cachedAccount;
@@ -567,11 +954,14 @@ public final class GoogleStore {
                 return cachedAccount;
             }
 
-            String raw = env("GOOGLE_SERVICE_ACCOUNT_JSON", "");
+            String raw = env(
+                    "GOOGLE_SERVICE_ACCOUNT_JSON",
+                    ""
+            );
 
             if (raw.isBlank()) {
                 throw new IllegalStateException(
-                        "Google credentials missing. Add GOOGLE_SERVICE_ACCOUNT_JSON in Render Environment."
+                        "Google Sheets credentials missing. Add GOOGLE_SERVICE_ACCOUNT_JSON in Render Environment."
                 );
             }
 
@@ -579,9 +969,11 @@ public final class GoogleStore {
 
             if (raw.trim().startsWith("{")) {
                 jsonBytes = raw.getBytes(StandardCharsets.UTF_8);
+
             } else {
                 try {
                     jsonBytes = Base64.getDecoder().decode(raw);
+
                 } catch (IllegalArgumentException invalid) {
                     throw new IllegalStateException(
                             "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON or base64 JSON."
@@ -592,16 +984,32 @@ public final class GoogleStore {
             JsonNode root;
 
             try {
-                root = JSON.readTree(new ByteArrayInputStream(jsonBytes));
+                root = JSON.readTree(
+                        new ByteArrayInputStream(jsonBytes)
+                );
+
             } catch (Exception e) {
-                throw new IllegalStateException("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.");
+                throw new IllegalStateException(
+                        "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON."
+                );
             }
 
-            String clientEmail = root.path("client_email").asText("");
-            String tokenUri = root.path("token_uri").asText("https://oauth2.googleapis.com/token");
-            String privateKeyPem = root.path("private_key").asText("");
+            String clientEmail = root
+                    .path("client_email")
+                    .asText("");
 
-            if (clientEmail.isBlank() || privateKeyPem.isBlank()) {
+            String tokenUri = root
+                    .path("token_uri")
+                    .asText(GOOGLE_OAUTH_TOKEN);
+
+            String privateKeyPem = root
+                    .path("private_key")
+                    .asText("");
+
+            if (
+                    clientEmail.isBlank() ||
+                    privateKeyPem.isBlank()
+            ) {
                 throw new IllegalStateException(
                         "GOOGLE_SERVICE_ACCOUNT_JSON is missing client_email or private_key."
                 );
@@ -615,13 +1023,21 @@ public final class GoogleStore {
             byte[] der;
 
             try {
-                der = Base64.getDecoder().decode(cleanPem);
+                der = Base64
+                        .getDecoder()
+                        .decode(cleanPem);
+
             } catch (IllegalArgumentException e) {
-                throw new IllegalStateException("Service account private_key is invalid.");
+                throw new IllegalStateException(
+                        "Service account private_key is invalid."
+                );
             }
 
-            PrivateKey privateKey = KeyFactory.getInstance("RSA")
-                    .generatePrivate(new PKCS8EncodedKeySpec(der));
+            PrivateKey privateKey = KeyFactory
+                    .getInstance("RSA")
+                    .generatePrivate(
+                            new PKCS8EncodedKeySpec(der)
+                    );
 
             cachedAccount = new ServiceAccount(
                     clientEmail,
@@ -633,6 +1049,10 @@ public final class GoogleStore {
         }
     }
 
+    /*************************************************
+     * HELPERS
+     *************************************************/
+
     private static DriveItem driveItem(JsonNode node) {
         return new DriveItem(
                 node.path("id").asText(""),
@@ -642,19 +1062,22 @@ public final class GoogleStore {
     }
 
     private static String formatIst(Instant instant) {
-        return DateTimeFormatter.ofPattern("dd/MM/yyyy hh:mm:ss a")
+        return DateTimeFormatter
+                .ofPattern("dd/MM/yyyy hh:mm:ss a")
                 .withZone(ZoneId.of("Asia/Kolkata"))
                 .format(instant);
     }
 
     private static String base64Url(byte[] bytes) {
-        return Base64.getUrlEncoder()
+        return Base64
+                .getUrlEncoder()
                 .withoutPadding()
                 .encodeToString(bytes);
     }
 
     private static String buildAddress(JsonNode data) {
         List<String> parts = new ArrayList<>();
+
         addIf(parts, text(data, "address1"));
         addIf(parts, text(data, "address2"));
         addIf(parts, text(data, "address3"));
@@ -671,15 +1094,26 @@ public final class GoogleStore {
         return address;
     }
 
-    private static void addIf(List<String> list, String value) {
+    private static void addIf(
+            List<String> list,
+            String value
+    ) {
         if (value != null && !value.isBlank()) {
             list.add(value.trim());
         }
     }
 
-    private static String text(JsonNode node, String field) {
-        JsonNode v = node == null ? null : node.get(field);
-        return v == null || v.isNull() ? "" : v.asText("").trim();
+    private static String text(
+            JsonNode node,
+            String field
+    ) {
+        JsonNode value = node == null
+                ? null
+                : node.get(field);
+
+        return value == null || value.isNull()
+                ? ""
+                : value.asText("").trim();
     }
 
     private static String sanitize(String value) {
@@ -696,11 +1130,18 @@ public final class GoogleStore {
     }
 
     private static String enc(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+        return URLEncoder.encode(
+                safe(value),
+                StandardCharsets.UTF_8
+        );
     }
 
     private static String encPath(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8)
+        return URLEncoder
+                .encode(
+                        safe(value),
+                        StandardCharsets.UTF_8
+                )
                 .replace("+", "%20");
     }
 
@@ -708,8 +1149,13 @@ public final class GoogleStore {
         return value == null ? "" : value;
     }
 
-    private static String env(String name, String fallback) {
-        String v = System.getenv(name);
-        return v == null ? fallback : v.trim();
+    private static String env(
+            String name,
+            String fallback
+    ) {
+        String value = System.getenv(name);
+        return value == null
+                ? fallback
+                : value.trim();
     }
 }
