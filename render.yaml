@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: nusi-dg-photo
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: API_KEY
+        generateValue: true
+      - key: MAX_CONCURRENT_DG
+        value: "1"
