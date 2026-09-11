@@ -1,0 +1,335 @@
+:root{
+  --navy:#0b3558;
+  --navy-deep:#082a49;
+  --cyan:#3fb1dc;
+  --bg:#edf5f9;
+  --line:#c8d8e5;
+  --text:#0b2a4a;
+  --muted:#66788a;
+  --danger:#dc3545;
+  --success:#198754;
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  min-height:100vh;
+  font-family:Arial,Helvetica,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+
+.header{
+  min-height:88px;
+  background:linear-gradient(90deg,var(--navy-deep),#123f68);
+  color:#fff;
+  display:grid;
+  grid-template-columns:110px 1fr 110px;
+  align-items:center;
+  padding:10px 26px;
+  gap:14px;
+  box-shadow:0 2px 8px rgba(0,0,0,.12);
+}
+
+.header-logo-side{
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+}
+
+.header-logo-right{justify-content:flex-end}
+
+.brand-logo{
+  display:block;
+  object-fit:contain;
+}
+
+.nusi-logo{
+  width:68px;
+  height:68px;
+}
+
+.itf-logo{
+  width:70px;
+  height:70px;
+  background:#fff;
+  border-radius:50%;
+  padding:4px;
+}
+
+.header-text{
+  text-align:left;
+}
+
+.header-title{
+  font-size:26px;
+  line-height:1.1;
+  font-weight:800;
+  letter-spacing:.2px;
+}
+
+.header-sub{
+  margin-top:6px;
+  color:#ff4c5b;
+  font-size:14px;
+  font-weight:700;
+}
+
+.main-container{
+  width:min(1080px,calc(100% - 28px));
+  margin:22px auto 40px;
+  display:grid;
+  grid-template-columns:285px minmax(0,1fr);
+  gap:22px;
+  align-items:start;
+}
+
+.left-panel,.card{
+  background:#fff;
+  border-radius:14px;
+  box-shadow:0 7px 22px rgba(19,55,82,.11);
+}
+
+.left-panel{
+  padding:16px;
+  position:sticky;
+  top:18px;
+}
+
+.panel-title{
+  font-size:20px;
+  font-weight:800;
+  margin-bottom:12px;
+}
+
+.slider{
+  overflow:hidden;
+  border-radius:12px;
+  background:#e7eef4;
+}
+
+#sliderImages{min-height:240px}
+
+.slider-stage{
+  position:relative;
+  height:240px;
+  overflow:hidden;
+  border-radius:12px;
+  background:#e7eef4;
+}
+
+.slider-stage img{
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:cover;
+}
+
+.slider-arrow{
+  position:absolute;
+  top:50%;
+  transform:translateY(-50%);
+  width:34px;
+  height:34px;
+  border:0;
+  border-radius:50%;
+  background:rgba(33,44,54,.50);
+  color:#fff;
+  font-size:20px;
+  cursor:pointer;
+}
+
+.slider-arrow.prev{left:8px}
+.slider-arrow.next{right:8px}
+
+.slider-dots{
+  position:absolute;
+  left:8px;
+  right:8px;
+  bottom:8px;
+  display:flex;
+  justify-content:center;
+  flex-wrap:wrap;
+  gap:5px;
+}
+
+.slider-dot{
+  width:6px;
+  height:6px;
+  background:rgba(255,255,255,.55);
+  border-radius:50%;
+}
+
+.slider-dot.active{background:#fff;transform:scale(1.4)}
+.slider-loading,.slider-empty{padding:90px 12px;text-align:center;color:var(--muted)}
+
+.card{padding:24px}
+
+.card h2{
+  margin:0 0 24px;
+  text-align:center;
+  font-size:22px;
+}
+
+.form-row{margin-bottom:17px}
+
+.form-row label{
+  display:block;
+  margin-bottom:7px;
+  font-size:13px;
+  font-weight:700;
+}
+
+input,select{
+  width:100%;
+  min-height:42px;
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:#fff;
+  padding:9px 11px;
+  font:inherit;
+  color:#24384b;
+  outline:none;
+}
+
+input:focus,select:focus{
+  border-color:#4aa8dc;
+  box-shadow:0 0 0 3px rgba(74,168,220,.12);
+}
+
+.two-column{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:14px;
+}
+
+.dob-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.dob-row input[type=date]{flex:1}
+.age-box{width:72px;flex:0 0 72px;text-align:center;font-weight:700}
+.eligibility{font-size:13px;font-weight:700;white-space:nowrap}
+
+.upload-block{
+  border:1px dashed #a9bfd0;
+  padding:13px;
+  border-radius:9px;
+  background:#f8fbfd;
+}
+
+.upload-note{
+  display:block;
+  margin-top:4px;
+  color:var(--muted);
+  font-weight:400;
+  font-size:12px;
+  line-height:1.4;
+}
+
+.temporary-note{
+  margin:4px 0 20px;
+  padding:11px 13px;
+  border-radius:8px;
+  background:#fff7df;
+  border:1px solid #f0d17a;
+  color:#70530a;
+  font-size:12px;
+  line-height:1.45;
+}
+
+.center{text-align:center}
+
+.btn{
+  min-width:220px;
+  border:0;
+  border-radius:8px;
+  background:var(--navy);
+  color:#fff;
+  padding:12px 22px;
+  font-size:15px;
+  font-weight:700;
+  cursor:pointer;
+}
+
+.btn:disabled{opacity:.55;cursor:not-allowed}
+
+.loading{
+  margin-top:18px;
+  text-align:center;
+  font-size:13px;
+  color:var(--muted);
+}
+
+.loader{
+  width:30px;
+  height:30px;
+  border:4px solid #d9e5ed;
+  border-top-color:var(--navy);
+  border-radius:50%;
+  margin:0 auto 8px;
+  animation:spin .8s linear infinite;
+}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.toast{
+  position:fixed;
+  right:18px;
+  bottom:18px;
+  max-width:min(420px,calc(100% - 36px));
+  padding:13px 16px;
+  border-radius:9px;
+  color:#fff;
+  box-shadow:0 8px 24px rgba(0,0,0,.22);
+  z-index:1000;
+  font-size:14px;
+}
+
+.toast.success{background:var(--success)}
+.toast.error{background:var(--danger)}
+
+.logo-credit{
+  text-align:center;
+  padding:10px 14px 18px;
+  color:#738292;
+  font-size:10px;
+}
+
+@media (max-width:850px){
+  .header{
+    grid-template-columns:70px 1fr 70px;
+    padding:9px 12px;
+  }
+  .nusi-logo,.itf-logo{width:56px;height:56px}
+  .header-title{font-size:20px}
+  .header-sub{font-size:12px}
+
+  .main-container{
+    grid-template-columns:1fr;
+    width:min(720px,calc(100% - 20px));
+    margin-top:14px;
+  }
+
+  .left-panel{position:static}
+  .slider-stage,#sliderImages{min-height:220px;height:220px}
+}
+
+@media (max-width:560px){
+  .header{
+    grid-template-columns:54px 1fr 54px;
+    gap:8px;
+  }
+  .nusi-logo,.itf-logo{width:46px;height:46px}
+  .header-title{font-size:17px}
+  .header-sub{font-size:10px}
+  .card{padding:18px 14px}
+  .card h2{font-size:19px}
+  .two-column{grid-template-columns:1fr}
+  .dob-row{align-items:stretch;flex-wrap:wrap}
+  .dob-row input[type=date]{min-width:180px}
+  .eligibility{width:100%}
+}

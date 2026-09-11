@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: nusi-membership
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: API_KEY
+        generateValue: true
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: SHEET_NAME
+        value: Sheet1
+      - key: MAIN_FOLDER_ID
+        sync: false
+      - key: SLIDER_FOLDER_ID
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
