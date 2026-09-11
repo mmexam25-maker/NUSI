@@ -1,65 +1,880 @@
-let sliderImages=[];let sliderIndex=0;let sliderTimer=null;
-const $=id=>document.getElementById(id);
-const val=id=>($(id)?.value||'').trim();
+let sliderImages = [];
+let sliderIndex = 0;
+let sliderTimer = null;
 
-window.addEventListener('load',()=>{
-  loadSlider();
-  $('name')?.addEventListener('input',function(){this.value=toTitleCase(this.value)});
-  $('city')?.addEventListener('input',function(){this.value=toTitleCase(this.value)});
-  $('dob')?.addEventListener('change',calculateAge);
-  $('memberForm')?.addEventListener('submit',e=>{e.preventDefault();submitForm()});
+const $ = id => document.getElementById(id);
+
+const val = id => {
+    const el = $(id);
+    return el ? el.value.trim() : "";
+};
+
+
+/*************************************************
+ * PAGE LOAD
+ *************************************************/
+
+window.addEventListener("load", function () {
+
+    loadSlider();
+
+    const name = $("name");
+
+    if (name) {
+        name.addEventListener("input", function () {
+            this.value = toTitleCase(this.value);
+        });
+    }
+
+    const city = $("city");
+
+    if (city) {
+        city.addEventListener("input", function () {
+            this.value = toTitleCase(this.value);
+        });
+    }
+
+    const form = $("memberForm");
+
+    if (form) {
+        form.addEventListener("submit", function (e) {
+
+            e.preventDefault();
+
+            submitForm();
+
+        });
+    }
+
 });
 
-function toTitleCase(str){return String(str||'').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase())}
 
-async function loadSlider(){
-  const box=$('sliderImages'); if(!box)return;
-  try{
-    const r=await fetch('/api/slider',{cache:'no-store'}); const j=await r.json();
-    if(!r.ok)throw new Error(j.error||'Unable to load slider.');
-    sliderImages=Array.isArray(j)?j:[];
-    if(!sliderImages.length){box.innerHTML='<div class="slider-empty">No updates available.</div>';return}
-    box.innerHTML=`<div class="slider-stage"><img id="sliderMainPhoto" alt="NUSI update"><button type="button" class="slider-arrow prev" aria-label="Previous">❮</button><button type="button" class="slider-arrow next" aria-label="Next">❯</button><div id="sliderDots" class="slider-dots"></div></div>`;
-    box.querySelector('.prev').addEventListener('click',()=>moveSlider(-1));
-    box.querySelector('.next').addEventListener('click',()=>moveSlider(1));
-    const dots=$('sliderDots');
-    sliderImages.forEach((_,i)=>{const d=document.createElement('span');d.className='slider-dot';d.addEventListener('click',()=>{sliderIndex=i;showSlide();restartSlider()});dots.appendChild(d)});
-    showSlide();startSlider();
-  }catch(e){box.innerHTML='<div class="slider-empty">Unable to load updates.</div>';console.error(e)}
-}
-function showSlide(){if(!sliderImages.length)return;const img=$('sliderMainPhoto');if(!img)return;img.src=sliderImages[sliderIndex].url;img.alt=sliderImages[sliderIndex].name||'NUSI update';document.querySelectorAll('.slider-dot').forEach((d,i)=>d.classList.toggle('active',i===sliderIndex))}
-function moveSlider(step){if(!sliderImages.length)return;sliderIndex=(sliderIndex+step+sliderImages.length)%sliderImages.length;showSlide();restartSlider()}
-function startSlider(){clearInterval(sliderTimer);if(sliderImages.length>1)sliderTimer=setInterval(()=>{sliderIndex=(sliderIndex+1)%sliderImages.length;showSlide()},3000)}
-function restartSlider(){clearInterval(sliderTimer);startSlider()}
+/*************************************************
+ * TITLE CASE
+ *************************************************/
 
-function calculateAge(){
-  const dob=val('dob');if(!dob)return;const birth=new Date(dob+'T00:00:00');if(Number.isNaN(birth.getTime()))return;
-  const today=new Date();let age=today.getFullYear()-birth.getFullYear();const m=today.getMonth()-birth.getMonth();if(m<0||(m===0&&today.getDate()<birth.getDate()))age--;
-  $('age').value=age;const s=$('eligibility');if(age>=18&&age<=60){s.textContent='✅ Eligible';s.style.color='#198754'}else{s.textContent='❌ Not Eligible';s.style.color='#dc3545'}
+function toTitleCase(str) {
+
+    return String(str || "")
+        .toLowerCase()
+        .replace(/\b\w/g, function (c) {
+            return c.toUpperCase();
+        });
+
 }
 
-async function submitForm(){
-  const age=parseInt(val('age'),10);if(!Number.isFinite(age)||age<18||age>60){showToast('Not Eligible. Age should be between 18 and 60 years.',true);return}
-  const cdcFile=$('cdcfile').files[0],passportFile=$('passport').files[0];
-  if(!cdcFile||!passportFile){showToast('Please upload CDC and Passport PDF.',true);return}
-  if(cdcFile.type!=='application/pdf'||passportFile.type!=='application/pdf'){showToast('CDC and Passport must be PDF files.',true);return}
-  setLoading(true);
-  try{
-    const data={
-      name:val('name'),cdc:val('cdc').toUpperCase(),indos:val('indos').toUpperCase(),indosPassword:val('indosPassword'),dob:val('dob'),age:val('age'),blood:val('blood'),rank:val('rank'),mobile:val('mobile'),altmobile:val('altmobile'),email:val('email'),altemail:val('altemail'),address1:val('address1'),address2:val('address2'),address3:val('address3'),city:val('city'),state:val('state'),pincode:val('pincode'),cdcfile:await fileToBase64(cdcFile),passport:await fileToBase64(passportFile)
-    };
-    const r=await fetch('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-    const res=await r.json();if(!r.ok||!res.success)throw new Error(res.message||res.error||'Membership submission failed.');
-    showToast('Membership Submitted Successfully.');
-    whatsapp(res);
-    $('memberForm').reset();$('eligibility').textContent='';
-  }catch(e){showToast(e.message||String(e),true)}finally{setLoading(false)}
+
+/*************************************************
+ * LOAD SLIDER
+ *************************************************/
+
+async function loadSlider() {
+
+    const box = $("sliderImages");
+
+    if (!box) return;
+
+
+    try {
+
+        const response = await fetch(
+            "/api/slider",
+            {
+                cache: "no-store"
+            }
+        );
+
+
+        const result =
+            await response.json();
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                result.error ||
+                "Unable to load updates."
+            );
+        }
+
+
+        sliderImages =
+            Array.isArray(result)
+                ? result
+                : [];
+
+
+        if (sliderImages.length === 0) {
+
+            box.innerHTML =
+                '<div class="slider-empty">No updates available.</div>';
+
+            return;
+        }
+
+
+        box.innerHTML = `
+
+            <div class="slider-stage">
+
+                <img
+                    id="sliderMainPhoto"
+                    alt="NUSI Update"
+                >
+
+                <button
+                    type="button"
+                    class="slider-arrow prev"
+                    aria-label="Previous"
+                >
+                    ❮
+                </button>
+
+                <button
+                    type="button"
+                    class="slider-arrow next"
+                    aria-label="Next"
+                >
+                    ❯
+                </button>
+
+                <div
+                    id="sliderDots"
+                    class="slider-dots"
+                ></div>
+
+            </div>
+
+        `;
+
+
+        box
+            .querySelector(".prev")
+            .addEventListener(
+                "click",
+                function () {
+                    moveSlider(-1);
+                }
+            );
+
+
+        box
+            .querySelector(".next")
+            .addEventListener(
+                "click",
+                function () {
+                    moveSlider(1);
+                }
+            );
+
+
+        const dots =
+            $("sliderDots");
+
+
+        sliderImages.forEach(
+            function (img, index) {
+
+                const dot =
+                    document.createElement(
+                        "span"
+                    );
+
+
+                dot.className =
+                    "slider-dot";
+
+
+                dot.addEventListener(
+                    "click",
+                    function () {
+
+                        sliderIndex =
+                            index;
+
+                        showSlide();
+
+                        restartSlider();
+
+                    }
+                );
+
+
+                dots.appendChild(dot);
+
+            }
+        );
+
+
+        sliderIndex = 0;
+
+        showSlide();
+
+        startSlider();
+
+
+    } catch (err) {
+
+        console.error(err);
+
+        box.innerHTML =
+            '<div class="slider-empty">Unable to load updates.</div>';
+
+    }
+
 }
-function setLoading(on){$('loading').hidden=!on;$('submitBtn').disabled=on}
-function fileToBase64(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=e=>{const raw=String(e.target.result||'');resolve({name:file.name,mime:file.type,data:raw.includes(',')?raw.split(',')[1]:raw})};reader.onerror=()=>reject(new Error('File could not be read.'));reader.readAsDataURL(file)})}
-function whatsapp(d){
-  const number='917538848180';
-  const msg=`*NUSI NEW MEMBERSHIP 2026*\n\n*Name:* ${d.name||''}\n*CDC No:* ${d.cdc||''}\n*INDoS No:* ${d.indos||''}\n*DOB:* ${d.dob||''}\n*Age:* ${d.age||''}\n*Blood Group:* ${d.blood||''}\n*Rank:* ${d.rank||''}\n\n*Mobile:* ${d.mobile||''}\n*Alternate Mobile:* ${d.altmobile||''}\n\n*Email:* ${d.email||''}\n*Alternate Email:* ${d.altemail||''}\n\n*Address:* ${d.address||''}\n\n*DG Profile Photo*\n${d.photo||''}\n\n*CDC PDF*\n${d.cdcfile||''}\n\n*Passport PDF*\n${d.passport||''}\n\n*Folder*\n${d.folder||''}`;
-  window.open('https://wa.me/'+number+'?text='+encodeURIComponent(msg),'_blank');
+
+
+/*************************************************
+ * SHOW SLIDE
+ *************************************************/
+
+function showSlide() {
+
+    if (!sliderImages.length) {
+        return;
+    }
+
+
+    const img =
+        $("sliderMainPhoto");
+
+
+    if (!img) {
+        return;
+    }
+
+
+    img.src =
+        sliderImages[
+            sliderIndex
+        ].url;
+
+
+    img.alt =
+        sliderImages[
+            sliderIndex
+        ].name ||
+        "NUSI Update";
+
+
+    document
+        .querySelectorAll(
+            ".slider-dot"
+        )
+        .forEach(
+            function (dot, index) {
+
+                dot.classList.toggle(
+                    "active",
+                    index === sliderIndex
+                );
+
+            }
+        );
+
 }
-function showToast(message,isError=false){const old=document.querySelector('.toast');if(old)old.remove();const t=document.createElement('div');t.className='toast '+(isError?'error':'success');t.textContent=message;document.body.appendChild(t);setTimeout(()=>t.remove(),5000)}
+
+
+/*************************************************
+ * MOVE SLIDER
+ *************************************************/
+
+function moveSlider(step) {
+
+    if (!sliderImages.length) {
+        return;
+    }
+
+
+    sliderIndex =
+        (
+            sliderIndex +
+            step +
+            sliderImages.length
+        ) %
+        sliderImages.length;
+
+
+    showSlide();
+
+    restartSlider();
+
+}
+
+
+/*************************************************
+ * AUTO SLIDER
+ *************************************************/
+
+function startSlider() {
+
+    clearInterval(
+        sliderTimer
+    );
+
+
+    if (
+        sliderImages.length <= 1
+    ) {
+        return;
+    }
+
+
+    sliderTimer =
+        setInterval(
+            function () {
+
+                sliderIndex =
+                    (
+                        sliderIndex + 1
+                    ) %
+                    sliderImages.length;
+
+
+                showSlide();
+
+            },
+            3000
+        );
+
+}
+
+
+function restartSlider() {
+
+    clearInterval(
+        sliderTimer
+    );
+
+    startSlider();
+
+}
+
+
+/*************************************************
+ * CALCULATE AGE
+ *************************************************/
+
+function calculateAge() {
+
+    const dob =
+        val("dob");
+
+
+    if (!dob) {
+        return;
+    }
+
+
+    const birth =
+        new Date(
+            dob + "T00:00:00"
+        );
+
+
+    if (
+        Number.isNaN(
+            birth.getTime()
+        )
+    ) {
+        return;
+    }
+
+
+    const today =
+        new Date();
+
+
+    let age =
+        today.getFullYear() -
+        birth.getFullYear();
+
+
+    const monthDifference =
+        today.getMonth() -
+        birth.getMonth();
+
+
+    if (
+        monthDifference < 0 ||
+        (
+            monthDifference === 0 &&
+            today.getDate() <
+            birth.getDate()
+        )
+    ) {
+
+        age--;
+
+    }
+
+
+    $("age").value =
+        age;
+
+
+    const status =
+        $("eligibility");
+
+
+    if (
+        age >= 18 &&
+        age <= 60
+    ) {
+
+        status.textContent =
+            "✅ Eligible";
+
+        status.style.color =
+            "#198754";
+
+    } else {
+
+        status.textContent =
+            "❌ Not Eligible";
+
+        status.style.color =
+            "#dc3545";
+
+    }
+
+}
+
+
+/*************************************************
+ * SUBMIT MEMBERSHIP
+ *************************************************/
+
+async function submitForm() {
+
+    const age =
+        parseInt(
+            val("age"),
+            10
+        );
+
+
+    if (
+        !Number.isFinite(age) ||
+        age < 18 ||
+        age > 60
+    ) {
+
+        alert(
+            "Not Eligible. Age should be between 18 and 60 years."
+        );
+
+        return;
+    }
+
+
+    /*********************************************
+     * INDOS PASSWORD
+     *********************************************/
+
+    if (
+        !val("indosPassword")
+    ) {
+
+        alert(
+            "Please enter INDoS Password."
+        );
+
+        return;
+    }
+
+
+    /*********************************************
+     * FILES
+     *********************************************/
+
+    const cdcInput =
+        $("cdcfile");
+
+    const passportInput =
+        $("passport");
+
+
+    const cdcFile =
+        cdcInput &&
+        cdcInput.files
+            ? cdcInput.files[0]
+            : null;
+
+
+    const passportFile =
+        passportInput &&
+        passportInput.files
+            ? passportInput.files[0]
+            : null;
+
+
+    if (
+        !cdcFile ||
+        !passportFile
+    ) {
+
+        alert(
+            "Please upload CDC and Passport PDF."
+        );
+
+        return;
+    }
+
+
+    if (
+        cdcFile.type !==
+            "application/pdf" ||
+        passportFile.type !==
+            "application/pdf"
+    ) {
+
+        alert(
+            "CDC and Passport must be PDF files."
+        );
+
+        return;
+    }
+
+
+    setLoading(true);
+
+
+    try {
+
+        /*****************************************
+         * FORM DATA
+         *****************************************/
+
+        const data = {
+
+            name:
+                val("name"),
+
+            cdc:
+                val("cdc")
+                    .toUpperCase(),
+
+            indos:
+                val("indos")
+                    .toUpperCase(),
+
+            /*
+             * Used by Java only for DG login.
+             * Not stored in sheet.
+             */
+            indosPassword:
+                val(
+                    "indosPassword"
+                ),
+
+            dob:
+                val("dob"),
+
+            age:
+                val("age"),
+
+            blood:
+                val("blood"),
+
+            rank:
+                val("rank"),
+
+            mobile:
+                val("mobile"),
+
+            altmobile:
+                val("altmobile"),
+
+            email:
+                val("email"),
+
+            altemail:
+                val("altemail"),
+
+            address1:
+                val("address1"),
+
+            address2:
+                val("address2"),
+
+            address3:
+                val("address3"),
+
+            city:
+                val("city"),
+
+            state:
+                val("state"),
+
+            pincode:
+                val("pincode"),
+
+            cdcfile:
+                await fileToBase64(
+                    cdcFile
+                ),
+
+            passport:
+                await fileToBase64(
+                    passportFile
+                )
+
+        };
+
+
+        /*****************************************
+         * SEND TO JAVA SERVER
+         *****************************************/
+
+        const response =
+            await fetch(
+                "/api/submit",
+                {
+
+                    method:
+                        "POST",
+
+                    headers: {
+
+                        "Content-Type":
+                            "application/json"
+
+                    },
+
+                    body:
+                        JSON.stringify(
+                            data
+                        )
+
+                }
+            );
+
+
+        let result;
+
+
+        try {
+
+            result =
+                await response.json();
+
+        } catch (err) {
+
+            throw new Error(
+                "Server returned an invalid response."
+            );
+
+        }
+
+
+        if (
+            !response.ok ||
+            !result.success
+        ) {
+
+            throw new Error(
+                result.message ||
+                result.error ||
+                "Membership submission failed."
+            );
+
+        }
+
+
+        /*****************************************
+         * SUCCESS
+         *****************************************/
+
+        alert(
+            "Membership Submitted Successfully."
+        );
+
+
+        whatsapp(
+            result
+        );
+
+
+        $("memberForm")
+            .reset();
+
+
+        $("eligibility")
+            .textContent = "";
+
+
+    } catch (err) {
+
+        console.error(err);
+
+
+        alert(
+            err.message ||
+            String(err)
+        );
+
+
+    } finally {
+
+        setLoading(false);
+
+    }
+
+}
+
+
+/*************************************************
+ * LOADING
+ *************************************************/
+
+function setLoading(on) {
+
+    const loading =
+        $("loading");
+
+    const button =
+        $("submitBtn");
+
+
+    if (loading) {
+
+        loading.style.display =
+            on
+                ? "block"
+                : "none";
+
+    }
+
+
+    if (button) {
+
+        button.disabled =
+            on;
+
+    }
+
+}
+
+
+/*************************************************
+ * FILE -> BASE64
+ *************************************************/
+
+function fileToBase64(file) {
+
+    return new Promise(
+        function (
+            resolve,
+            reject
+        ) {
+
+            const reader =
+                new FileReader();
+
+
+            reader.onload =
+                function (event) {
+
+                    const raw =
+                        String(
+                            event.target.result ||
+                            ""
+                        );
+
+
+                    resolve({
+
+                        name:
+                            file.name,
+
+                        mime:
+                            file.type,
+
+                        data:
+                            raw.includes(",")
+                                ? raw.split(",")[1]
+                                : raw
+
+                    });
+
+                };
+
+
+            reader.onerror =
+                function () {
+
+                    reject(
+                        new Error(
+                            "File could not be read."
+                        )
+                    );
+
+                };
+
+
+            reader.readAsDataURL(
+                file
+            );
+
+        }
+    );
+
+}
+
+
+/*************************************************
+ * WHATSAPP
+ *************************************************/
+
+function whatsapp(d) {
+
+    const number =
+        "917538848180";
+
+
+    const msg =
+`*NUSI NEW MEMBERSHIP 2026*
+
+*Name:* ${d.name || ""}
+*CDC No:* ${d.cdc || ""}
+*INDoS No:* ${d.indos || ""}
+*DOB:* ${d.dob || ""}
+*Age:* ${d.age || ""}
+*Blood Group:* ${d.blood || ""}
+*Rank:* ${d.rank || ""}
+
+*Mobile:* ${d.mobile || ""}
+*Alternate Mobile:* ${d.altmobile || ""}
+
+*Email:* ${d.email || ""}
+*Alternate Email:* ${d.altemail || ""}
+
+*Address:*
+${d.address || ""}
+
+*DG Profile Photo*
+${d.photo || ""}
+
+*CDC PDF*
+${d.cdcfile || ""}
+
+*Passport PDF*
+${d.passport || ""}
+
+*Folder*
+${d.folder || ""}`;
+
+
+    window.open(
+        "https://wa.me/" +
+        number +
+        "?text=" +
+        encodeURIComponent(
+            msg
+        ),
+        "_blank"
+    );
+
+}
