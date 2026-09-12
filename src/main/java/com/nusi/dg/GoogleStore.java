@@ -274,32 +274,34 @@ public final class GoogleStore {
         );
 
         // A:X = 24 columns
-        List<Object> row = List.of(
-                surname,                           // A Surname
-                givenName,                         // B Given Name
-                text(data, "cdc"),                // C CDC
-                indos,                             // D INDoS
-                text(data, "dob"),                // E DOB
-                text(data, "age"),                // F Age
-                text(data, "blood"),              // G Blood Group
-                text(data, "rank"),               // H Rank
-                photoLink,                         // I Photo temp link
-                cdcLink,                           // J CDC temp link
-                passportLink,                      // K Passport temp link
-                text(data, "nominee"),            // L Nominee
-                address,                           // M Address
-                text(data, "mobile"),             // N Mobile
-                text(data, "altmobile"),          // O Alternate Mobile
-                text(data, "email"),              // P Email
-                text(data, "altemail"),           // Q Alternate Email
-                text(data, "city"),               // R City
-                text(data, "state"),              // S State
-                text(data, "pincode"),            // T Pincode
-                submittedAt,                       // U Submitted At
-                expiresAt,                         // V Link Expires At
-                folder.id(),                       // W Temporary Drive Folder ID
-                "ACTIVE - AUTO DELETE 24H"         // X Status
-        );
+        String fullName = (surname + " " + givenName).trim();
+
+List<Object> row = List.of(
+        fullName,                   // A Name
+        text(data, "cdc"),          // B CDC No
+        indos,                      // C INDOS No
+        text(data, "dob"),          // D DOB
+        text(data, "age"),          // E Age
+        text(data, "blood"),        // F Blood Group
+        text(data, "rank"),         // G Rank
+        photoLink,                  // H Photo Upload
+        cdcLink,                    // I CDC Upload
+        passportLink,               // J Passport Upload
+        "",                         // K Signature Upload
+        "",                         // L Reserved
+        address,                    // M Address
+        text(data, "nominee"),      // N Nominee
+        text(data, "mobile"),       // O Mobile
+        text(data, "altmobile"),    // P Alternate Mobile
+        text(data, "email"),        // Q Email
+        text(data, "altemail"),     // R Alternate Email
+        text(data, "city"),         // S City
+        text(data, "state"),        // T State
+        text(data, "pincode"),      // U Pincode
+        submittedAt,                // V Submitted At
+        expiresAt,                  // W Link Expires
+        "ACTIVE - AUTO DELETE 24H"  // X Status
+);
 
         appendSheetRow(row);
 
