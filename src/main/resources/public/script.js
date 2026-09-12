@@ -249,7 +249,7 @@ function fileToBase64(file) {
 }
 
 function whatsapp(d) {
-  const number = '917538848180';
+const number = '919488352735';
 
   const msg = `*NUSI NEW MEMBERSHIP 2026*
 
