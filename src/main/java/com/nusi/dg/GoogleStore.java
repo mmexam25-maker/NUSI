@@ -213,59 +213,15 @@ public final class GoogleStore {
                 + "_" + sanitize(indos)
                 + "_" + submitted.toEpochMilli();
 
-        DriveItem folder = createTemporaryFolder(
-                folderName,
-                expiresEpoch
-        );
+        String photoFileName = photoMime.equalsIgnoreCase("image/png") ? "Photo.png" : "Photo.jpg";
 
-        String photoFileName = photoMime.equalsIgnoreCase("image/png")
-                ? "Photo.png"
-                : "Photo.jpg";
+        LocalTempStore.StoredFile photo = LocalTempStore.save(photoFileName, photoMime, photoBytes, expiresEpoch);
+        LocalTempStore.StoredFile cdc = LocalTempStore.save("CDC.pdf", "application/pdf", cdcPdf, expiresEpoch);
+        LocalTempStore.StoredFile passport = LocalTempStore.save("Passport.pdf", "application/pdf", passportPdf, expiresEpoch);
 
-        StoredFile photo = uploadFile(
-                folder.id(),
-                photoFileName,
-                photoMime,
-                photoBytes
-        );
-
-        StoredFile cdc = uploadFile(
-                folder.id(),
-                "CDC.pdf",
-                "application/pdf",
-                cdcPdf
-        );
-
-        StoredFile passport = uploadFile(
-                folder.id(),
-                "Passport.pdf",
-                "application/pdf",
-                passportPdf
-        );
-
-        String photoLink = TempLinks.create(
-                baseUrl,
-                photo.id(),
-                expiresEpoch,
-                photo.name(),
-                linkSecret
-        );
-
-        String cdcLink = TempLinks.create(
-                baseUrl,
-                cdc.id(),
-                expiresEpoch,
-                cdc.name(),
-                linkSecret
-        );
-
-        String passportLink = TempLinks.create(
-                baseUrl,
-                passport.id(),
-                expiresEpoch,
-                passport.name(),
-                linkSecret
-        );
+        String photoLink = TempLinks.create(baseUrl, photo.id(), expiresEpoch, photo.name(), linkSecret);
+        String cdcLink = TempLinks.create(baseUrl, cdc.id(), expiresEpoch, cdc.name(), linkSecret);
+        String passportLink = TempLinks.create(baseUrl, passport.id(), expiresEpoch, passport.name(), linkSecret);
 
         String address = buildAddress(data);
         String submittedAt = formatIst(submitted);
@@ -319,58 +275,7 @@ List<Object> row = List.of(
      *************************************************/
 
     public static int cleanupExpired() throws Exception {
-        long now = Instant.now().getEpochSecond();
-        int deleted = 0;
-        String pageToken = "";
-
-        do {
-            String q = "'" + escapeDriveQuery(MAIN_FOLDER_ID) + "' in parents"
-                    + " and mimeType='application/vnd.google-apps.folder'"
-                    + " and appProperties has { key='nusiTemp' and value='true' }"
-                    + " and trashed=false";
-
-            String url = DRIVE_FILES
-                    + "?q=" + enc(q)
-                    + "&fields=" + enc("nextPageToken,files(id,name,appProperties)")
-                    + "&pageSize=100"
-                    + "&supportsAllDrives=true"
-                    + "&includeItemsFromAllDrives=true";
-
-            if (!pageToken.isBlank()) {
-                url += "&pageToken=" + enc(pageToken);
-            }
-
-            JsonNode root = getDriveJson(url);
-            JsonNode files = root.path("files");
-
-            if (files.isArray()) {
-                for (JsonNode folder : files) {
-                    String id = folder.path("id").asText("");
-                    String expText = folder
-                            .path("appProperties")
-                            .path("nusiExpiresAt")
-                            .asText("");
-
-                    long exp;
-
-                    try {
-                        exp = Long.parseLong(expText);
-                    } catch (Exception ignored) {
-                        continue;
-                    }
-
-                    if (!id.isBlank() && exp <= now) {
-                        trashDriveFile(id);
-                        deleted++;
-                    }
-                }
-            }
-
-            pageToken = root.path("nextPageToken").asText("");
-
-        } while (!pageToken.isBlank());
-
-        return deleted;
+        return LocalTempStore.cleanupExpired();
     }
 
     /*************************************************

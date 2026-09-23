@@ -320,7 +320,8 @@ public final class Main {
                 return;
             }
 
-            GoogleStore.BinaryFile file = GoogleStore.readDriveFile(id);
+            LocalTempStore.BinaryFile local = LocalTempStore.read(id);
+            GoogleStore.BinaryFile file = new GoogleStore.BinaryFile(local.bytes(), local.mimeType(), local.name());
             sendBinary(ex, file, true);
 
         } catch (IllegalArgumentException unavailable) {
