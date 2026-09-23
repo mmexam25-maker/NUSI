@@ -38,7 +38,7 @@ public final class GoogleStore {
 
     private static final String SPREADSHEET_ID = env(
             "SPREADSHEET_ID",
-            "1BCovd-XYwFto5oelzmgDvYjCNpQ45WP1pFk7Xd0Fqok"
+            "1I14AkZP-07iU_X08pTmfpSRNgaeSYexD7ALAQ0Y7ynE"
     );
 
     private static final String SHEET_NAME = env("SHEET_NAME", "Sheet1");
@@ -505,12 +505,38 @@ List<Object> row = List.of(
     }
 
     /*************************************************
+     * ENSURE GOOGLE SHEET HEADER (A:X)
+     *************************************************/
+
+    private static void ensureSheetHeader() throws Exception {
+        List<Object> header = List.of(
+                "Name", "CDC No", "INDOS No", "DOB", "Age", "Blood Group",
+                "Rank", "Photo Upload", "CDC Upload", "Passport Upload",
+                "Signature Upload", "Reserved", "Address", "Nominee",
+                "Mobile", "Alternate Mobile", "Email", "Alternate Email",
+                "City", "State", "Pincode", "Submitted At", "Link Expires", "Status"
+        );
+
+        String range = "'" + SHEET_NAME.replace("'", "''") + "'!A1:X1";
+        String url = SHEETS_BASE
+                + encPath(SPREADSHEET_ID)
+                + "/values/"
+                + encPath(range)
+                + "?valueInputOption=USER_ENTERED";
+
+        Map<String, Object> body = Map.of("values", List.of(header));
+        sendSheetsJsonRequest("PUT", url, JSON.writeValueAsBytes(body));
+    }
+
+    /*************************************************
      * APPEND GOOGLE SHEET
      *************************************************/
 
     private static void appendSheetRow(
             List<Object> row
     ) throws Exception {
+
+        ensureSheetHeader();
 
         String range = "'"
                 + SHEET_NAME.replace("'", "''")
