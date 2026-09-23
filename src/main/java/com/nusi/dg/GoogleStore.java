@@ -54,12 +54,10 @@ public final class GoogleStore {
     );
 
     /*
-     * Drive is authenticated using the user's Google OAuth refresh token.
-     * This avoids the Service Account storage quota restriction.
+     * Google Drive and Google Sheets are authenticated with one Service Account.
+     * Put the complete service-account JSON (or its Base64 form) in
+     * GOOGLE_SERVICE_ACCOUNT_JSON. Never commit the JSON key to GitHub.
      */
-    private static final String GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", "");
-    private static final String GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", "");
-    private static final String GOOGLE_REFRESH_TOKEN = env("GOOGLE_REFRESH_TOKEN", "");
 
     private static final String DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
     private static final String DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
@@ -68,6 +66,8 @@ public final class GoogleStore {
 
     private static final String SHEETS_SCOPE =
             "https://www.googleapis.com/auth/spreadsheets";
+    private static final String DRIVE_SCOPE =
+            "https://www.googleapis.com/auth/drive";
 
     private static final long LINK_LIFETIME_SECONDS = 24L * 60L * 60L;
 
@@ -770,87 +770,7 @@ List<Object> row = List.of(
      *************************************************/
 
     private static String driveAccessToken() throws Exception {
-        Token token = cachedDriveToken;
-        long now = Instant.now().getEpochSecond();
-
-        if (
-                token != null &&
-                token.expiresAtEpochSeconds() > now + 90
-        ) {
-            return token.value();
-        }
-
-        synchronized (GoogleStore.class) {
-            token = cachedDriveToken;
-            now = Instant.now().getEpochSecond();
-
-            if (
-                    token != null &&
-                    token.expiresAtEpochSeconds() > now + 90
-            ) {
-                return token.value();
-            }
-
-            if (
-                    GOOGLE_CLIENT_ID.isBlank() ||
-                    GOOGLE_CLIENT_SECRET.isBlank() ||
-                    GOOGLE_REFRESH_TOKEN.isBlank()
-            ) {
-                throw new IllegalStateException(
-                        "Drive OAuth credentials missing. Add GOOGLE_CLIENT_ID, "
-                                + "GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN in Render Environment."
-                );
-            }
-
-            String form = "client_id=" + enc(GOOGLE_CLIENT_ID)
-                    + "&client_secret=" + enc(GOOGLE_CLIENT_SECRET)
-                    + "&refresh_token=" + enc(GOOGLE_REFRESH_TOKEN)
-                    + "&grant_type=" + enc("refresh_token");
-
-            HttpRequest request = HttpRequest
-                    .newBuilder(URI.create(GOOGLE_OAUTH_TOKEN))
-                    .timeout(Duration.ofSeconds(30))
-                    .header(
-                            "Content-Type",
-                            "application/x-www-form-urlencoded"
-                    )
-                    .POST(
-                            HttpRequest.BodyPublishers.ofString(
-                                    form,
-                                    StandardCharsets.UTF_8
-                            )
-                    )
-                    .build();
-
-            HttpResponse<byte[]> response = send(
-                    request,
-                    HttpResponse.BodyHandlers.ofByteArray()
-            );
-
-            require2xx(
-                    response.statusCode(),
-                    response.body(),
-                    "Google Drive OAuth refresh failed"
-            );
-
-            JsonNode root = JSON.readTree(response.body());
-            String value = root.path("access_token").asText("");
-            long expiresIn = root.path("expires_in").asLong(3600);
-
-            if (value.isBlank()) {
-                throw new IllegalStateException(
-                        "Google Drive OAuth response did not contain access_token."
-                );
-            }
-
-            cachedDriveToken = new Token(
-                    value,
-                    Instant.now().getEpochSecond()
-                            + Math.max(300, expiresIn)
-            );
-
-            return value;
-        }
+        return serviceAccountAccessToken(DRIVE_SCOPE, true);
     }
 
     /*************************************************
@@ -858,110 +778,56 @@ List<Object> row = List.of(
      *************************************************/
 
     private static String sheetsAccessToken() throws Exception {
-        Token token = cachedSheetsToken;
-        long now = Instant.now().getEpochSecond();
+        return serviceAccountAccessToken(SHEETS_SCOPE, false);
+    }
 
-        if (
-                token != null &&
-                token.expiresAtEpochSeconds() > now + 90
-        ) {
-            return token.value();
-        }
+    private static String serviceAccountAccessToken(String scope, boolean drive) throws Exception {
+        Token token = drive ? cachedDriveToken : cachedSheetsToken;
+        long now = Instant.now().getEpochSecond();
+        if (token != null && token.expiresAtEpochSeconds() > now + 90) return token.value();
 
         synchronized (GoogleStore.class) {
-            token = cachedSheetsToken;
+            token = drive ? cachedDriveToken : cachedSheetsToken;
             now = Instant.now().getEpochSecond();
-
-            if (
-                    token != null &&
-                    token.expiresAtEpochSeconds() > now + 90
-            ) {
-                return token.value();
-            }
+            if (token != null && token.expiresAtEpochSeconds() > now + 90) return token.value();
 
             ServiceAccount account = serviceAccount();
             long iat = Instant.now().getEpochSecond();
             long exp = iat + 3600;
 
-            String header = base64Url(
-                    JSON.writeValueAsBytes(
-                            Map.of(
-                                    "alg", "RS256",
-                                    "typ", "JWT"
-                            )
-                    )
-            );
-
+            String header = base64Url(JSON.writeValueAsBytes(Map.of("alg", "RS256", "typ", "JWT")));
             Map<String, Object> claims = new LinkedHashMap<>();
             claims.put("iss", account.clientEmail());
-            claims.put("scope", SHEETS_SCOPE);
+            claims.put("scope", scope);
             claims.put("aud", account.tokenUri());
             claims.put("iat", iat);
             claims.put("exp", exp);
 
-            String payload = base64Url(
-                    JSON.writeValueAsBytes(claims)
-            );
-
+            String payload = base64Url(JSON.writeValueAsBytes(claims));
             String signingInput = header + "." + payload;
-
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initSign(account.privateKey());
-            signature.update(
-                    signingInput.getBytes(StandardCharsets.US_ASCII)
-            );
+            signature.update(signingInput.getBytes(StandardCharsets.US_ASCII));
+            String assertion = signingInput + "." + base64Url(signature.sign());
 
-            String assertion = signingInput
-                    + "."
-                    + base64Url(signature.sign());
-
-            String form = "grant_type="
-                    + enc("urn:ietf:params:oauth:grant-type:jwt-bearer")
-                    + "&assertion="
-                    + enc(assertion);
-
-            HttpRequest tokenRequest = HttpRequest
-                    .newBuilder(URI.create(account.tokenUri()))
+            String form = "grant_type=" + enc("urn:ietf:params:oauth:grant-type:jwt-bearer")
+                    + "&assertion=" + enc(assertion);
+            HttpRequest request = HttpRequest.newBuilder(URI.create(account.tokenUri()))
                     .timeout(Duration.ofSeconds(30))
-                    .header(
-                            "Content-Type",
-                            "application/x-www-form-urlencoded"
-                    )
-                    .POST(
-                            HttpRequest.BodyPublishers.ofString(
-                                    form,
-                                    StandardCharsets.UTF_8
-                            )
-                    )
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(form, StandardCharsets.UTF_8))
                     .build();
+            HttpResponse<byte[]> response = send(request, HttpResponse.BodyHandlers.ofByteArray());
+            require2xx(response.statusCode(), response.body(),
+                    drive ? "Google Drive service-account token request failed"
+                          : "Google Sheets service-account token request failed");
 
-            HttpResponse<byte[]> tokenResponse = send(
-                    tokenRequest,
-                    HttpResponse.BodyHandlers.ofByteArray()
-            );
-
-            require2xx(
-                    tokenResponse.statusCode(),
-                    tokenResponse.body(),
-                    "Google Sheets OAuth token request failed"
-            );
-
-            JsonNode root = JSON.readTree(tokenResponse.body());
+            JsonNode root = JSON.readTree(response.body());
             String value = root.path("access_token").asText("");
             long expiresIn = root.path("expires_in").asLong(3600);
-
-            if (value.isBlank()) {
-                throw new IllegalStateException(
-                        "Google Sheets OAuth response did not contain access_token."
-                );
-            }
-
-            cachedSheetsToken = new Token(
-                    value,
-                    Instant.now().getEpochSecond()
-                            + Math.max(300, expiresIn)
-            );
-
+            if (value.isBlank()) throw new IllegalStateException("Google service-account response did not contain access_token.");
+            Token fresh = new Token(value, Instant.now().getEpochSecond() + Math.max(300, expiresIn));
+            if (drive) cachedDriveToken = fresh; else cachedSheetsToken = fresh;
             return value;
         }
     }
@@ -989,7 +855,7 @@ List<Object> row = List.of(
 
             if (raw.isBlank()) {
                 throw new IllegalStateException(
-                        "Google Sheets credentials missing. Add GOOGLE_SERVICE_ACCOUNT_JSON in Render Environment."
+                        "Google credentials missing. Add GOOGLE_SERVICE_ACCOUNT_JSON in Railway Variables."
                 );
             }
 
